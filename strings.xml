@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Радар Кэфа МСК</string>
+    <string name="accessibility_description">Необязательно: считывает коэффициент, цену и адрес на экране Яндекс Про, чтобы уточнять расчёт спроса. Данные остаются на устройстве.</string>
+    <string name="widget_description">Спрос по тарифам для выбранной зоны</string>
+</resources>

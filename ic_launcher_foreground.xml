@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- кольца радара -->
+    <path
+        android:pathData="M54,54m-30,0a30,30 0,1,0 60,0a30,30 0,1,0 -60,0"
+        android:strokeWidth="1.8"
+        android:strokeColor="#CC40E0D0" />
+    <path
+        android:pathData="M54,54m-20,0a20,20 0,1,0 40,0a20,20 0,1,0 -40,0"
+        android:strokeWidth="1.4"
+        android:strokeColor="#9940E0D0" />
+    <path
+        android:pathData="M54,54m-10,0a10,10 0,1,0 20,0a10,10 0,1,0 -20,0"
+        android:strokeWidth="1.2"
+        android:strokeColor="#6640E0D0" />
+
+    <!-- перекрестие -->
+    <path
+        android:pathData="M54,24L54,84M24,54L84,54"
+        android:strokeWidth="0.9"
+        android:strokeColor="#5540E0D0" />
+
+    <!-- луч-развёртка -->
+    <path
+        android:fillColor="#5540E0D0"
+        android:pathData="M54,54L84,54A30,30 0,0,0 69,28.02z" />
+    <path
+        android:pathData="M54,54L84,54"
+        android:strokeLineCap="round"
+        android:strokeWidth="2.2"
+        android:strokeColor="#FF8FFFEA" />
+
+    <!-- всплески спроса -->
+    <path
+        android:fillColor="#40FF3B30"
+        android:pathData="M66,40m-7,0a7,7 0,1,0 14,0a7,7 0,1,0 -14,0" />
+    <path
+        android:fillColor="#FFFF3B30"
+        android:pathData="M66,40m-3.6,0a3.6,3.6 0,1,0 7.2,0a3.6,3.6 0,1,0 -7.2,0" />
+    <path
+        android:fillColor="#40FF8A3D"
+        android:pathData="M41,60m-6,0a6,6 0,1,0 12,0a6,6 0,1,0 -12,0" />
+    <path
+        android:fillColor="#FFFF8A3D"
+        android:pathData="M41,60m-3,0a3,3 0,1,0 6,0a3,3 0,1,0 -6,0" />
+    <path
+        android:fillColor="#40FFC107"
+        android:pathData="M60,70m-5,0a5,5 0,1,0 10,0a5,5 0,1,0 -10,0" />
+    <path
+        android:fillColor="#FFFFC107"
+        android:pathData="M60,70m-2.6,0a2.6,2.6 0,1,0 5.2,0a2.6,2.6 0,1,0 -5.2,0" />
+
+    <!-- центр -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M54,54m-2.2,0a2.2,2.2 0,1,0 4.4,0a2.2,2.2 0,1,0 -4.4,0" />
+</vector>
