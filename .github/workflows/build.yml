@@ -1,17 +1,28 @@
-name: Build Surge Radar APK
+name: Build and Release SurgeRadar (OTA)
 
 on:
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: 'Опубликовать GitHub Release для обновления по воздуху (OTA)'
+        required: false
+        type: boolean
+        default: true
+      release_tag:
+        description: 'Тег релиза (оставьте пустым для авто-тега v<versionName> из build.gradle)'
+        required: false
+        type: string
+        default: ''
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -22,27 +33,20 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # GitHub-hosted Android runners already contain the Android SDK.
-      # We intentionally do NOT use android-actions/setup-android here because
-      # that action can try to install the removed legacy "tools" package.
       - name: Prepare Android SDK
         shell: bash
         run: |
           set -e
           SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
           echo "Android SDK: $SDK_ROOT"
-
           SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager 2>/dev/null | head -n 1 || true)"
           if [ -z "$SDKMANAGER" ]; then
             SDKMANAGER="$(command -v sdkmanager || true)"
           fi
-
           if [ -z "$SDKMANAGER" ]; then
             echo "ERROR: sdkmanager was not found on the GitHub runner."
             exit 1
           fi
-
-          echo "Using sdkmanager: $SDKMANAGER"
           echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
           yes | "$SDKMANAGER" --licenses >/dev/null || true
           "$SDKMANAGER" "platform-tools" "platforms;android-34" "build-tools;34.0.0"
@@ -52,50 +56,135 @@ jobs:
         run: |
           set -e
           ARCHIVE="$(ls -1 ./*.zip 2>/dev/null | head -n 1 || true)"
-
           if [ -n "$ARCHIVE" ]; then
             echo "Using archive: $ARCHIVE"
             rm -rf project
             mkdir project
             unzip -q "$ARCHIVE" -d project
-            if [ -f "project/build.gradle" ] && [ -d "project/app" ]; then
+            if [ -f "project/settings.gradle" ] && [ -d "project/app" ]; then
               PROJECT_DIR="project"
             else
               PROJECT_DIR="$(find project -mindepth 1 -maxdepth 2 -name settings.gradle -type f -printf '%h\n' | head -n 1)"
             fi
-          elif [ -f "build.gradle" ] && [ -d "app" ]; then
+          elif [ -f "settings.gradle" ] && [ -d "app" ]; then
             echo "No ZIP found, using repository files directly"
             PROJECT_DIR="."
           else
-            echo "ERROR: no ZIP archive and no Gradle project in the repository root."
-            ls -la
-            exit 1
+            PROJECT_DIR="$(find . -mindepth 1 -maxdepth 2 -name settings.gradle -type f -not -path './.git/*' -printf '%h\n' | head -n 1)"
           fi
 
           if [ -z "$PROJECT_DIR" ] || [ ! -f "$PROJECT_DIR/settings.gradle" ]; then
-            echo "ERROR: Android project was not found."
+            echo "ERROR: Android project (settings.gradle) was not found."
             find . -maxdepth 3 -type f -not -path './.git/*' | sort
             exit 1
           fi
 
+          APP_VERSION="$(awk -F'"' '/versionName/ {print $2; exit}' "$PROJECT_DIR/app/build.gradle")"
+          if [ -z "$APP_VERSION" ]; then
+            APP_VERSION="0.0.0"
+          fi
+
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Project directory: $PROJECT_DIR"
+          echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
+          echo "Project directory: $PROJECT_DIR (versionName=$APP_VERSION)"
+
+      - name: Determine release tag (auto-release on push to main and tags)
+        shell: bash
+        run: |
+          set -e
+          SHOULD_RELEASE="false"
+          TAG_NAME=""
+
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            SHOULD_RELEASE="true"
+            TAG_NAME="${GITHUB_REF_NAME}"
+          elif [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            if [ "${{ inputs.publish_release }}" != "false" ]; then
+              SHOULD_RELEASE="true"
+              INPUT_TAG="${{ inputs.release_tag }}"
+              TAG_NAME="${INPUT_TAG:-v${APP_VERSION}}"
+            fi
+          elif [ "${GITHUB_REF}" = "refs/heads/main" ] && [ "$APP_VERSION" != "0.0.0" ]; then
+            SHOULD_RELEASE="true"
+            TAG_NAME="v${APP_VERSION}"
+          fi
+
+          echo "SHOULD_RELEASE=$SHOULD_RELEASE" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=$TAG_NAME" >> "$GITHUB_ENV"
+          echo "Release enabled: $SHOULD_RELEASE, tag: $TAG_NAME"
+
+      - name: Restore signing key (Secret or bundled keystore)
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.SURGE_KEYSTORE_BASE64 }}
+        run: |
+          set -e
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            mkdir -p "$RUNNER_TEMP/surge-signing"
+            echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/surge-signing/surge.keystore"
+            echo "SURGE_KEYSTORE_FILE=$RUNNER_TEMP/surge-signing/surge.keystore" >> "$GITHUB_ENV"
+            echo "Using keystore from GitHub Secrets"
+          elif [ -f "$PROJECT_DIR/signing/surge.keystore" ]; then
+            echo "Using keystore from $PROJECT_DIR/signing/surge.keystore"
+          else
+            echo "ERROR: No signing keystore found (set SURGE_KEYSTORE_BASE64 secret or include signing/surge.keystore)."
+            exit 1
+          fi
 
       - name: Set up Gradle 8.4
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.4'
 
-      - name: Build debug APK
+      - name: Build signed release & debug APKs
         shell: bash
+        env:
+          SURGE_KEYSTORE_PASSWORD: ${{ secrets.SURGE_KEYSTORE_PASSWORD }}
+          SURGE_KEY_ALIAS: ${{ secrets.SURGE_KEY_ALIAS }}
+          SURGE_KEY_PASSWORD: ${{ secrets.SURGE_KEY_PASSWORD }}
         run: |
           set -e
           cd "$PROJECT_DIR"
-          gradle --no-daemon --stacktrace assembleDebug
+          gradle --no-daemon --stacktrace assembleDebug assembleRelease
 
-      - name: Upload APK
+      - name: Verify release APK signature & prepare release asset
+        shell: bash
+        run: |
+          set -e
+          SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          RAW_RELEASE="$PROJECT_DIR/app/build/outputs/apk/release/app-release.apk"
+          "$SDK_ROOT/build-tools/34.0.0/apksigner" verify --verbose "$RAW_RELEASE"
+
+          OUT_DIR="$RUNNER_TEMP/release-assets"
+          mkdir -p "$OUT_DIR"
+          ASSET_TAG="${RELEASE_TAG:-v${APP_VERSION}}"
+          RELEASE_APK="$OUT_DIR/SurgeRadar-${ASSET_TAG}-release.apk"
+          cp "$RAW_RELEASE" "$RELEASE_APK"
+          echo "RELEASE_APK=$RELEASE_APK" >> "$GITHUB_ENV"
+          ls -lh "$RELEASE_APK"
+
+      - name: Upload release APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SurgeRadar-debug
+          name: SurgeRadar-v${{ env.APP_VERSION }}-release
+          path: ${{ env.RELEASE_APK }}
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload debug APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SurgeRadar-v${{ env.APP_VERSION }}-debug
           path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish GitHub Release (OTA)
+        if: env.SHOULD_RELEASE == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: SurgeRadar ${{ env.RELEASE_TAG }}
+          files: ${{ env.RELEASE_APK }}
+          generate_release_notes: true
+          make_latest: 'true'
